@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Asana Meeting Recorder</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f4f0; color: #1a1a1a; min-height: 100vh; padding: 24px 16px; }
+  .container { max-width: 680px; margin: 0 auto; }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { font-size: 14px; color: #666; margin-bottom: 24px; }
+  .card { background: #fff; border: 0.5px solid rgba(0,0,0,0.12); border-radius: 12px; padding: 20px; margin-bottom: 14px; }
+  label { display: block; font-size: 13px; color: #666; margin-bottom: 4px; margin-top: 12px; }
+  label:first-of-type { margin-top: 0; }
+  input[type=text], input[type=password], select {
+    width: 100%; padding: 9px 12px; font-size: 14px; border: 0.5px solid rgba(0,0,0,0.2);
+    border-radius: 8px; outline: none; background: #fff; color: #1a1a1a;
+  }
+  input:focus, select:focus { border-color: #378ADD; box-shadow: 0 0 0 3px rgba(55,138,221,0.15); }
+  button {
+    width: 100%; padding: 10px 16px; font-size: 14px; font-weight: 500;
+    border: 0.5px solid rgba(0,0,0,0.2); border-radius: 8px; background: #fff;
+    cursor: pointer; margin-top: 14px; color: #1a1a1a; transition: background 0.15s;
+  }
+  button:hover { background: #f0eeea; }
+  button.primary { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+  button.primary:hover { background: #333; }
+  button.danger { background: #fff0f0; border-color: #e24b4a; color: #a32d2d; }
+  button.danger:hover { background: #ffe0e0; }
+  .screen { display: none; } .screen.active { display: block; }
+  .err { font-size: 13px; color: #a32d2d; background: #fcebeb; border-radius: 8px; padding: 10px 12px; margin-top: 10px; line-height: 1.5; }
+  .hint { font-size: 12px; color: #888; margin-top: 4px; line-height: 1.5; }
+  .info-box { font-size: 13px; color: #27500A; background: #eaf3de; border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; line-height: 1.7; }
+  .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+  .stat { background: #f5f4f0; border-radius: 8px; padding: 12px 14px; }
+  .stat-label { font-size: 12px; color: #666; margin-bottom: 4px; }
+  .stat-val { font-size: 24px; font-weight: 600; }
+  .timer { font-size: 36px; font-weight: 600; letter-spacing: 0.04em; margin: 8px 0; }
+  .pulse-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #1D9E75; margin-right: 6px; animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.25;} }
+  .badge { display: inline-block; font-size: 11px; padding: 3px 9px; border-radius: 20px; font-weight: 500; }
+  .badge-blue { background: #E6F1FB; color: #0C447C; }
+  .badge-gray { background: #f0eeea; color: #444; }
+  .activity-item { padding: 10px 0; border-bottom: 0.5px solid rgba(0,0,0,0.08); }
+  .activity-item:last-child { border-bottom: none; }
+  .activity-task { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+  .activity-line { font-size: 13px; color: #444; line-height: 1.5; margin-bottom: 2px; display: flex; align-items: flex-start; gap: 6px; flex-wrap: wrap; }
+  .activity-time { font-size: 11px; color: #999; margin-bottom: 6px; }
+  .raw-box { background: #f5f4f0; border-radius: 8px; padding: 14px; font-size: 12px; font-family: monospace; color: #444; white-space: pre-wrap; line-height: 1.6; max-height: 300px; overflow-y: auto; margin-top: 10px; }
+  .loading { text-align: center; padding: 20px; color: #666; font-size: 14px; }
+  code { background: #f0eeea; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 12px; }
+  .token-note { font-size: 12px; color: #888; background: #f5f4f0; border-radius: 8px; padding: 10px 12px; margin-top: 8px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Asana meeting recorder</h1>
+  <p class="subtitle">Master Pacific — captures all Asana activity during a meeting and generates a summary.</p>
+
+  <!-- SETUP -->
+  <div id="s-setup" class="screen active">
+    <div class="info-box">
+      Your token is stored only in your browser on this device. It is never sent anywhere except directly to Asana.
+    </div>
+    <div class="card">
+      <label>Personal access token</label>
+      <input type="password" id="pat" placeholder="0/xxxxxxxxxxxxxxxxxxxxxxxx" />
+      <div class="token-note">
+        Get yours: Asana → click your profile photo → <strong>My Settings</strong> → <strong>Apps</strong> → <strong>Developer apps</strong> → New access token.
+      </div>
+      <label>Workspace ID</label>
+      <input type="text" id="org" value="1202484815826771" />
+      <p class="hint">Pre-filled for masterpacific.com.au</p>
+      <label><input type="checkbox" id="remember" style="width:auto;margin-right:6px;">Remember token on this device</label>
+      <button class="primary" id="connect-btn" onclick="doConnect()">Connect to Asana</button>
+      <div id="connect-err"></div>
+    </div>
+  </div>
+
+  <!-- SELECT -->
+  <div id="s-select" class="screen">
+    <div class="card">
+      <p style="font-size:15px;font-weight:600;margin-bottom:12px;">Set up your meeting</p>
+      <label>Project to watch</label>
+      <select id="project-select"><option value="">Loading projects...</option></select>
+      <label>Meeting name (optional)</label>
+      <input type="text" id="meeting-name" placeholder="e.g. Weekly production review" />
+      <button class="primary" onclick="startMeeting()">Start meeting timer</button>
+      <button onclick="logout()" style="margin-top:8px;font-size:13px;color:#888;">Switch account</button>
+      <div id="select-err"></div>
+    </div>
+  </div>
+
+  <!-- LIVE -->
+  <div id="s-live" class="screen">
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+        <span style="font-size:14px;font-weight:500;"><span class="pulse-dot"></span>Recording</span>
+        <span class="badge badge-blue" id="project-badge"></span>
+      </div>
+      <div class="timer" id="timer">00:00</div>
+      <p style="font-size:12px;color:#888;margin-bottom:16px;">Started at <span id="start-label"></span> — work in Asana as normal</p>
+      <button class="danger" onclick="endMeeting()">End meeting + fetch activity</button>
+    </div>
+  </div>
+
+  <!-- RESULTS -->
+  <div id="s-results" class="screen">
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-label">Tasks touched</div><div class="stat-val" id="stat-tasks">—</div></div>
+      <div class="stat"><div class="stat-label">Events</div><div class="stat-val" id="stat-events">—</div></div>
+      <div class="stat"><div class="stat-label">Duration</div><div class="stat-val" id="stat-dur">—</div></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <p style="font-size:14px;font-weight:600;">Raw activity log</p>
+        <span class="badge badge-gray" id="meeting-badge-result"></span>
+      </div>
+      <div id="activity-log" style="margin-top:12px;"></div>
+    </div>
+    <div class="card">
+      <p style="font-size:14px;font-weight:600;margin-bottom:6px;">Copy for Claude</p>
+      <p style="font-size:13px;color:#666;">Paste this into Claude to get your meeting summary and action list.</p>
+      <div class="raw-box" id="raw-log"></div>
+      <button id="copy-btn" onclick="copyRaw()">Copy raw log to clipboard</button>
+    </div>
+    <button onclick="newMeeting()" style="margin-top:4px;">Start a new meeting</button>
+  </div>
+</div>
+
+<script>
+const CORS = 'https://corsproxy.io/?';
+const BASE = 'https://app.asana.com/api/1.0';
+let PAT='', ORG='1202484815826771', meetingStart=null, timerInterval=null, allActivity=[], rawLines=[], selectedProjectName='';
+
+async function asana(path) {
+  const url = CORS + encodeURIComponent(BASE + path);
+  const r = await fetch(url, {
+    headers: { 'Authorization': 'Bearer ' + PAT, 'Accept': 'application/json' }
+  });
+  if (!r.ok) {
+    let msg = 'HTTP ' + r.status;
+    try { const d = await r.json(); msg = d.errors?.[0]?.message || msg; } catch(e) {}
+    throw new Error(msg);
+  }
+  return (await r.json()).data;
+}
+
+function show(id) { document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); document.getElementById(id).classList.add('active'); }
+
+window.onload = () => {
+  const saved = localStorage.getItem('asana_pat');
+  if (saved) { document.getElementById('pat').value = saved; document.getElementById('remember').checked = true; }
+  const org = localStorage.getItem('asana_org');
+  if (org) document.getElementById('org').value = org;
+};
+
+async function doConnect() {
+  const pat = document.getElementById('pat').value.trim();
+  const org = document.getElementById('org').value.trim();
+  const errEl = document.getElementById('connect-err');
+  errEl.innerHTML = '';
+  if (!pat) { errEl.innerHTML = '<div class="err">Please enter your personal access token.</div>'; return; }
+  if (org) ORG = org;
+  const btn = document.getElementById('connect-btn');
+  btn.textContent = 'Connecting...'; btn.disabled = true;
+  try {
+    PAT = pat;
+    await asana('/users/me');
+    if (document.getElementById('remember').checked) {
+      localStorage.setItem('asana_pat', pat);
+      localStorage.setItem('asana_org', ORG);
+    } else {
+      localStorage.removeItem('asana_pat');
+    }
+    await loadProjects();
+    show('s-select');
+  } catch(e) {
+    PAT = '';
+    let msg = e.message;
+    let extra = '';
+    if (msg.includes('401') || msg.includes('403')) extra = '<br>Check your token is correct and hasn\'t expired.';
+    errEl.innerHTML = '<div class="err">Could not connect: ' + msg + extra + '</div>';
+  }
+  btn.textContent = 'Connect to Asana'; btn.disabled = false;
+}
+
+async function loadProjects() {
+  const projects = await asana('/projects?workspace=' + ORG + '&limit=100&archived=false');
+  const sel = document.getElementById('project-select');
+  sel.innerHTML = '<option value="">Select a project...</option>' + projects.map(p => `<option value="${p.gid}">${p.name}</option>`).join('');
+}
+
+function startMeeting() {
+  const sel = document.getElementById('project-select');
+  const gid = sel.value;
+  if (!gid) { document.getElementById('select-err').innerHTML = '<div class="err">Please select a project.</div>'; return; }
+  selectedProjectName = sel.options[sel.selectedIndex].text;
+  meetingStart = new Date();
+  document.getElementById('project-badge').textContent = selectedProjectName;
+  document.getElementById('start-label').textContent = meetingStart.toLocaleTimeString('en-AU', {hour:'2-digit', minute:'2-digit'});
+  timerInterval = setInterval(() => {
+    const e = Math.floor((Date.now() - meetingStart) / 1000);
+    document.getElementById('timer').textContent = String(Math.floor(e/60)).padStart(2,'0') + ':' + String(e%60).padStart(2,'0');
+  }, 1000);
+  show('s-live');
+}
+
+async function endMeeting() {
+  clearInterval(timerInterval);
+  const meetingEnd = new Date();
+  const gid = document.getElementById('project-select').value;
+  const meetingName = document.getElementById('meeting-name').value || 'Meeting';
+  const durSecs = Math.floor((meetingEnd - meetingStart) / 1000);
+  document.getElementById('stat-dur').textContent = Math.floor(durSecs/60) + 'm ' + (durSecs%60) + 's';
+  document.getElementById('meeting-badge-result').textContent = meetingName;
+  show('s-results');
+  document.getElementById('activity-log').innerHTML = '<div class="loading">Fetching activity from Asana...</div>';
+  document.getElementById('raw-log').textContent = '';
+
+  try {
+    const tasks = await asana('/tasks?project=' + gid + '&limit=100&modified_since=' + meetingStart.toISOString() + '&opt_fields=name,modified_at');
+    const modified = tasks.filter(t => new Date(t.modified_at) >= meetingStart);
+    document.getElementById('stat-tasks').textContent = modified.length;
+
+    rawLines = [
+      'MEETING: ' + meetingName,
+      'PROJECT: ' + selectedProjectName,
+      'DATE: ' + meetingStart.toLocaleDateString('en-AU'),
+      'TIME: ' + meetingStart.toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'}) + ' – ' + meetingEnd.toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'}),
+      'DURATION: ' + Math.floor(durSecs/60) + 'm ' + (durSecs%60) + 's',
+      '',
+      '--- ACTIVITY LOG ---',
+      ''
+    ];
+
+    if (!modified.length) {
+      document.getElementById('activity-log').innerHTML = '<p style="font-size:13px;color:#666;">No tasks were modified during this meeting window.</p>';
+      document.getElementById('stat-events').textContent = '0';
+      document.getElementById('raw-log').textContent = rawLines.join('\n') + 'No activity recorded.';
+      return;
+    }
+
+    allActivity = [];
+    for (const task of modified) {
+      const stories = await asana('/tasks/' + task.gid + '/stories?opt_fields=type,text,created_at,created_by.name,resource_subtype');
+      const relevant = stories.filter(s => { const t = new Date(s.created_at); return t >= meetingStart && t <= meetingEnd; });
+      if (relevant.length) allActivity.push({task: task.name, events: relevant});
+    }
+
+    const totalEvents = allActivity.reduce((a,t) => a + t.events.length, 0);
+    document.getElementById('stat-events').textContent = totalEvents;
+
+    if (!allActivity.length) {
+      document.getElementById('activity-log').innerHTML = '<p style="font-size:13px;color:#666;">Tasks were modified but no story events fell within the meeting window. Try starting the timer a little earlier next time.</p>';
+      document.getElementById('raw-log').textContent = rawLines.join('\n') + 'No story events in window.';
+      return;
+    }
+
+    let html = '';
+    for (const item of allActivity) {
+      html += '<div class="activity-item"><div class="activity-task">' + item.task + '</div>';
+      rawLines.push('TASK: ' + item.task);
+      for (const ev of item.events) {
+        const who = ev.created_by ? ev.created_by.name : 'System';
+        const when = new Date(ev.created_at).toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+        const isComment = ev.type === 'comment';
+        html += '<div class="activity-line"><span class="badge ' + (isComment?'badge-blue':'badge-gray') + '">' + (isComment?'comment':'change') + '</span><span><strong>' + who + '</strong>: ' + ev.text + '</span></div>';
+        html += '<div class="activity-time">' + when + '</div>';
+        rawLines.push('  [' + when + '] (' + (isComment?'comment':'change') + ') ' + who + ': ' + ev.text);
+      }
+      rawLines.push('');
+      html += '</div>';
+    }
+    document.getElementById('activity-log').innerHTML = html;
+    document.getElementById('raw-log').textContent = rawLines.join('\n');
+
+  } catch(e) {
+    document.getElementById('activity-log').innerHTML = '<div class="err">Error fetching activity: ' + e.message + '</div>';
+  }
+}
+
+function copyRaw() {
+  navigator.clipboard.writeText(document.getElementById('raw-log').textContent).then(() => {
+    const btn = document.getElementById('copy-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = 'Copy raw log to clipboard'; }, 2000);
+  });
+}
+
+function logout() { PAT = ''; show('s-setup'); }
+function newMeeting() { allActivity = []; rawLines = []; meetingStart = null; show('s-select'); }
+</script>
+</body>
+</html>
