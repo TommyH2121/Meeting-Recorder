@@ -13,16 +13,9 @@
   .card { background: #fff; border: 0.5px solid rgba(0,0,0,0.12); border-radius: 12px; padding: 20px; margin-bottom: 14px; }
   label { display: block; font-size: 13px; color: #666; margin-bottom: 4px; margin-top: 12px; }
   label:first-of-type { margin-top: 0; }
-  input[type=text], input[type=password], select {
-    width: 100%; padding: 9px 12px; font-size: 14px; border: 0.5px solid rgba(0,0,0,0.2);
-    border-radius: 8px; outline: none; background: #fff; color: #1a1a1a;
-  }
+  input[type=text], input[type=password], select { width: 100%; padding: 9px 12px; font-size: 14px; border: 0.5px solid rgba(0,0,0,0.2); border-radius: 8px; outline: none; background: #fff; color: #1a1a1a; }
   input:focus, select:focus { border-color: #378ADD; box-shadow: 0 0 0 3px rgba(55,138,221,0.15); }
-  button {
-    width: 100%; padding: 10px 16px; font-size: 14px; font-weight: 500;
-    border: 0.5px solid rgba(0,0,0,0.2); border-radius: 8px; background: #fff;
-    cursor: pointer; margin-top: 14px; color: #1a1a1a; transition: background 0.15s;
-  }
+  button { width: 100%; padding: 10px 16px; font-size: 14px; font-weight: 500; border: 0.5px solid rgba(0,0,0,0.2); border-radius: 8px; background: #fff; cursor: pointer; margin-top: 14px; color: #1a1a1a; transition: background 0.15s; }
   button:hover { background: #f0eeea; }
   button.primary { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
   button.primary:hover { background: #333; }
@@ -49,32 +42,35 @@
   .activity-time { font-size: 11px; color: #999; margin-bottom: 6px; }
   .raw-box { background: #f5f4f0; border-radius: 8px; padding: 14px; font-size: 12px; font-family: monospace; color: #444; white-space: pre-wrap; line-height: 1.6; max-height: 300px; overflow-y: auto; margin-top: 10px; }
   .loading { text-align: center; padding: 20px; color: #666; font-size: 14px; }
-  code { background: #f0eeea; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 12px; }
   .token-note { font-size: 12px; color: #888; background: #f5f4f0; border-radius: 8px; padding: 10px 12px; margin-top: 8px; line-height: 1.6; }
+  .proxy-status { font-size: 11px; color: #888; text-align: center; margin-top: 8px; }
 </style>
 </head>
 <body>
 <div class="container">
   <h1>Asana meeting recorder</h1>
-  <p class="subtitle">Master Pacific — captures all Asana activity during a meeting and generates a summary.</p>
+  <p class="subtitle">Master Pacific — captures all Asana activity during a meeting.</p>
 
   <!-- SETUP -->
   <div id="s-setup" class="screen active">
     <div class="info-box">
-      Your token is stored only in your browser on this device. It is never sent anywhere except directly to Asana.
+      Your token is saved only in your browser on this device — never sent anywhere except directly to Asana.
     </div>
     <div class="card">
       <label>Personal access token</label>
       <input type="password" id="pat" placeholder="0/xxxxxxxxxxxxxxxxxxxxxxxx" />
       <div class="token-note">
-        Get yours: Asana → click your profile photo → <strong>My Settings</strong> → <strong>Apps</strong> → <strong>Developer apps</strong> → New access token.
+        Get yours: Asana → profile photo → <strong>My Settings</strong> → <strong>Apps</strong> → <strong>Developer apps</strong> → New access token.
       </div>
       <label>Workspace ID</label>
       <input type="text" id="org" value="1202484815826771" />
       <p class="hint">Pre-filled for masterpacific.com.au</p>
-      <label><input type="checkbox" id="remember" style="width:auto;margin-right:6px;">Remember token on this device</label>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:10px;">
+        <input type="checkbox" id="remember" style="width:auto;" /> Remember token on this device
+      </label>
       <button class="primary" id="connect-btn" onclick="doConnect()">Connect to Asana</button>
       <div id="connect-err"></div>
+      <div class="proxy-status" id="proxy-status"></div>
     </div>
   </div>
 
@@ -130,21 +126,39 @@
 </div>
 
 <script>
-const CORS = 'https://corsproxy.io/?';
 const BASE = 'https://app.asana.com/api/1.0';
-let PAT='', ORG='1202484815826771', meetingStart=null, timerInterval=null, allActivity=[], rawLines=[], selectedProjectName='';
+const PROXIES = [
+  url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  url => `https://proxy.cors.sh/${url}`,
+];
 
-async function asana(path) {
-  const url = CORS + encodeURIComponent(BASE + path);
-  const r = await fetch(url, {
-    headers: { 'Authorization': 'Bearer ' + PAT, 'Accept': 'application/json' }
-  });
-  if (!r.ok) {
-    let msg = 'HTTP ' + r.status;
-    try { const d = await r.json(); msg = d.errors?.[0]?.message || msg; } catch(e) {}
-    throw new Error(msg);
+let PAT='', ORG='1202484815826771', workingProxy=null, meetingStart=null, timerInterval=null, allActivity=[], rawLines=[], selectedProjectName='';
+
+async function tryFetch(asanaPath) {
+  const targetUrl = BASE + asanaPath;
+  const headers = { 'Authorization': 'Bearer ' + PAT, 'Accept': 'application/json' };
+
+  if (workingProxy !== null) {
+    const r = await fetch(PROXIES[workingProxy](targetUrl), { headers });
+    if (r.ok) return (await r.json()).data;
+    const d = await r.json().catch(()=>({}));
+    throw new Error(d.errors?.[0]?.message || 'HTTP ' + r.status);
   }
-  return (await r.json()).data;
+
+  for (let i = 0; i < PROXIES.length; i++) {
+    try {
+      document.getElementById('proxy-status').textContent = 'Trying connection method ' + (i+1) + ' of ' + PROXIES.length + '...';
+      const r = await fetch(PROXIES[i](targetUrl), { headers });
+      if (r.ok) {
+        const data = await r.json();
+        workingProxy = i;
+        document.getElementById('proxy-status').textContent = 'Connected via method ' + (i+1);
+        return data.data;
+      }
+    } catch(e) { continue; }
+  }
+  throw new Error('All connection methods failed. Check your token and try again.');
 }
 
 function show(id) { document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); document.getElementById(id).classList.add('active'); }
@@ -165,9 +179,10 @@ async function doConnect() {
   if (org) ORG = org;
   const btn = document.getElementById('connect-btn');
   btn.textContent = 'Connecting...'; btn.disabled = true;
+  workingProxy = null;
   try {
     PAT = pat;
-    await asana('/users/me');
+    await tryFetch('/users/me');
     if (document.getElementById('remember').checked) {
       localStorage.setItem('asana_pat', pat);
       localStorage.setItem('asana_org', ORG);
@@ -178,16 +193,13 @@ async function doConnect() {
     show('s-select');
   } catch(e) {
     PAT = '';
-    let msg = e.message;
-    let extra = '';
-    if (msg.includes('401') || msg.includes('403')) extra = '<br>Check your token is correct and hasn\'t expired.';
-    errEl.innerHTML = '<div class="err">Could not connect: ' + msg + extra + '</div>';
+    errEl.innerHTML = '<div class="err">' + e.message + '<br><br>Double-check your token hasn\'t expired. In Asana: profile photo → My Settings → Apps → Developer apps.</div>';
   }
   btn.textContent = 'Connect to Asana'; btn.disabled = false;
 }
 
 async function loadProjects() {
-  const projects = await asana('/projects?workspace=' + ORG + '&limit=100&archived=false');
+  const projects = await tryFetch('/projects?workspace=' + ORG + '&limit=100&archived=false');
   const sel = document.getElementById('project-select');
   sel.innerHTML = '<option value="">Select a project...</option>' + projects.map(p => `<option value="${p.gid}">${p.name}</option>`).join('');
 }
@@ -217,10 +229,9 @@ async function endMeeting() {
   document.getElementById('meeting-badge-result').textContent = meetingName;
   show('s-results');
   document.getElementById('activity-log').innerHTML = '<div class="loading">Fetching activity from Asana...</div>';
-  document.getElementById('raw-log').textContent = '';
 
   try {
-    const tasks = await asana('/tasks?project=' + gid + '&limit=100&modified_since=' + meetingStart.toISOString() + '&opt_fields=name,modified_at');
+    const tasks = await tryFetch('/tasks?project=' + gid + '&limit=100&modified_since=' + meetingStart.toISOString() + '&opt_fields=name,modified_at');
     const modified = tasks.filter(t => new Date(t.modified_at) >= meetingStart);
     document.getElementById('stat-tasks').textContent = modified.length;
 
@@ -228,11 +239,9 @@ async function endMeeting() {
       'MEETING: ' + meetingName,
       'PROJECT: ' + selectedProjectName,
       'DATE: ' + meetingStart.toLocaleDateString('en-AU'),
-      'TIME: ' + meetingStart.toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'}) + ' – ' + meetingEnd.toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'}),
+      'TIME: ' + meetingStart.toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'}) + ' to ' + meetingEnd.toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'}),
       'DURATION: ' + Math.floor(durSecs/60) + 'm ' + (durSecs%60) + 's',
-      '',
-      '--- ACTIVITY LOG ---',
-      ''
+      '', '--- ACTIVITY LOG ---', ''
     ];
 
     if (!modified.length) {
@@ -244,7 +253,7 @@ async function endMeeting() {
 
     allActivity = [];
     for (const task of modified) {
-      const stories = await asana('/tasks/' + task.gid + '/stories?opt_fields=type,text,created_at,created_by.name,resource_subtype');
+      const stories = await tryFetch('/tasks/' + task.gid + '/stories?opt_fields=type,text,created_at,created_by.name,resource_subtype');
       const relevant = stories.filter(s => { const t = new Date(s.created_at); return t >= meetingStart && t <= meetingEnd; });
       if (relevant.length) allActivity.push({task: task.name, events: relevant});
     }
@@ -253,7 +262,7 @@ async function endMeeting() {
     document.getElementById('stat-events').textContent = totalEvents;
 
     if (!allActivity.length) {
-      document.getElementById('activity-log').innerHTML = '<p style="font-size:13px;color:#666;">Tasks were modified but no story events fell within the meeting window. Try starting the timer a little earlier next time.</p>';
+      document.getElementById('activity-log').innerHTML = '<p style="font-size:13px;color:#666;">Tasks were modified but no story events fell within the meeting window.</p>';
       document.getElementById('raw-log').textContent = rawLines.join('\n') + 'No story events in window.';
       return;
     }
@@ -277,7 +286,7 @@ async function endMeeting() {
     document.getElementById('raw-log').textContent = rawLines.join('\n');
 
   } catch(e) {
-    document.getElementById('activity-log').innerHTML = '<div class="err">Error fetching activity: ' + e.message + '</div>';
+    document.getElementById('activity-log').innerHTML = '<div class="err">Error: ' + e.message + '</div>';
   }
 }
 
@@ -289,7 +298,7 @@ function copyRaw() {
   });
 }
 
-function logout() { PAT = ''; show('s-setup'); }
+function logout() { PAT = ''; workingProxy = null; show('s-setup'); }
 function newMeeting() { allActivity = []; rawLines = []; meetingStart = null; show('s-select'); }
 </script>
 </body>
